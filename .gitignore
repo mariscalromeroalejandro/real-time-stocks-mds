@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Environment files / secrets
+.env
+.env.*
+!.env.example
+
+# Airflow artifacts
+infra/logs/
+infra/airflow.cfg
+infra/airflow-webserver.pid
+
+# dbt artifacts
+dbt_stocks/**/target/
+dbt_stocks/**/dbt_packages/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
