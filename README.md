@@ -50,6 +50,13 @@ From the `infra` folder:
 docker compose up -d
 ```
 
+Run producer and consumer as Docker services (recommended):
+
+```powershell
+docker compose up -d --build producer consumer
+docker compose logs -f producer consumer
+```
+
 Initialize Airflow metadata DB:
 
 ```powershell
