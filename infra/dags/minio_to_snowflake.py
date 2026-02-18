@@ -1,11 +1,14 @@
 import os
 import boto3
 import snowflake.connector
-import os
 from dotenv import load_dotenv
 from airflow import DAG
+from airflow import settings
+from airflow.exceptions import AirflowSkipException
+from airflow.models import DagModel
 from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
+from datetime import datetime, time as dt_time, timedelta
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 
@@ -21,6 +24,33 @@ SNOWFLAKE_ACCOUNT = os.getenv("SNOWFLAKE_ACCOUNT")
 SNOWFLAKE_WAREHOUSE = os.getenv("SNOWFLAKE_WAREHOUSE")
 SNOWFLAKE_DB = os.getenv("SNOWFLAKE_DB")
 SNOWFLAKE_SCHEMA = os.getenv("SNOWFLAKE_SCHEMA")
+MARKET_TZ = ZoneInfo("America/New_York")
+MARKET_OPEN = dt_time(hour=9, minute=30)
+MARKET_CLOSE = dt_time(hour=16, minute=0)
+
+
+def _is_market_open_now() -> bool:
+    now_et = datetime.now(MARKET_TZ)
+    if now_et.weekday() > 4:
+        return False
+    return MARKET_OPEN <= now_et.time() < MARKET_CLOSE
+
+
+def pause_dag_when_market_closed(**kwargs):
+    if _is_market_open_now():
+        return
+
+    dag_id = kwargs["dag"].dag_id
+    session = settings.Session()
+    try:
+        dag_model = session.query(DagModel).filter(DagModel.dag_id == dag_id).one_or_none()
+        if dag_model and not dag_model.is_paused:
+            dag_model.set_is_paused(is_paused=True)
+            session.commit()
+    finally:
+        session.close()
+
+    raise AirflowSkipException("Market is closed. DAG has been paused.")
 
 def download_from_minio():
     os.makedirs(LOCAL_DIR, exist_ok=True)
@@ -84,6 +114,11 @@ with DAG(
     schedule_interval="*/1 * * * *",  # every 1 minutes
     catchup=False,
 ) as dag:
+    market_hours_guard = PythonOperator(
+        task_id="pause_if_market_closed",
+        python_callable=pause_dag_when_market_closed,
+        provide_context=True,
+    )
 
     task1 = PythonOperator(
         task_id="download_minio",
@@ -96,4 +131,4 @@ with DAG(
         provide_context=True,
     )
 
-    task1 >> task2
+    market_hours_guard >> task1 >> task2
