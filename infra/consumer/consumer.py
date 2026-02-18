@@ -2,19 +2,20 @@
 import json
 import boto3
 import time
-import os
+import sys
+from pathlib import Path
 from kafka import KafkaConsumer
-from dotenv import load_dotenv
 
-
-load_dotenv()
-
-# Variables
-S3_ENDPOINT_URL='http://localhost:9002'
-BUCKET_NAME = 'bronze-transactions'
-MINIO_ROOT_USER = os.getenv('MINIO_ROOT_USER', 'admin')
-MINIO_ROOT_PASSWORD = os.getenv('MINIO_ROOT_PASSWORD', 'password123')
-KAFKA_TOPIC = 'stock-quotes'
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from settings import (
+    BUCKET_NAME,
+    KAFKA_BOOTSTRAP_SERVERS,
+    KAFKA_CONSUMER_GROUP,
+    KAFKA_TOPIC,
+    MINIO_ROOT_PASSWORD,
+    MINIO_ROOT_USER,
+    S3_ENDPOINT_URL,
+)
 
 # MinIO Connection 
 s3 = boto3.client('s3', 
@@ -26,26 +27,29 @@ s3 = boto3.client('s3',
 consumer = KafkaConsumer(
     KAFKA_TOPIC,
     bootstrap_servers=[
-        'localhost:29092' # consumer runs on host, outside docker
+        KAFKA_BOOTSTRAP_SERVERS # consumer runs on host by default
     ],
     enable_auto_commit=True, # to save the offset after consuming messages
-    group_id="bronze-consumer",
+    group_id=KAFKA_CONSUMER_GROUP,
     value_deserializer=lambda x: json.loads(x.decode("utf-8")) # decode bytes to string and then parse JSON
 )
 
 print("Consumer is running and waiting for messages...")
 
 # Main function
-for message in consumer:
-    record = message.value
-    symbol = record.get("symbol", "unknown")
-    ts = record.get("fetched_at", int(time.time()))
-    key = f"{symbol}/{ts}.json" #unique filename
+while True:
+    message_pack = consumer.poll(timeout_ms=1000)
+    for _, messages in message_pack.items():
+        for message in messages:
+            record = message.value
+            symbol = record.get("symbol", "unknown")
+            ts = record.get("fetched_at", int(time.time()))
+            key = f"{symbol}/{ts}.json" #unique filename
 
-    s3.put_object(
-        Bucket=BUCKET_NAME,
-        Key=key,
-        Body=json.dumps(record),
-        ContentType='application/json'
-    )
-    print(f"Saved record for {symbol} = s3://{BUCKET_NAME}/{key}")
+            s3.put_object(
+                Bucket=BUCKET_NAME,
+                Key=key,
+                Body=json.dumps(record),
+                ContentType='application/json'
+            )
+            print(f"Saved record for {symbol} = s3://{BUCKET_NAME}/{key}")
